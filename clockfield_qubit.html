@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Clockfield Qubit — Γ(x) = 1/(1+τβ)²</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0b0d0f; color: #c8cdd4; font-family: 'Courier New', monospace;
+  display: flex; flex-direction: column; align-items: center; padding: 24px 16px; }
+h1 { font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; margin-bottom: 3px; color: #c8cdd4; }
+.sub { font-size: 11px; color: #5a6070; margin-bottom: 16px; }
+#main { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; }
+#canvas-wrap { position: relative; }
+canvas { display: block; border: 1px solid #222529; border-radius: 4px; }
+#overlay { position: absolute; top: 0; left: 0; pointer-events: none; border-radius: 4px; }
+#panel { width: 220px; display: flex; flex-direction: column; gap: 10px; }
+.card { background: #13161a; border: 1px solid #222529; border-radius: 4px; padding: 12px; }
+.ct { font-size: 10px; color: #5a6070; text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; }
+.row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.row label { font-size: 11px; color: #5a6070; width: 56px; flex-shrink: 0; }
+.row input[type=range] { flex: 1; accent-color: #1D9E75; }
+.row .v { font-size: 11px; color: #c8cdd4; width: 34px; text-align: right; }
+#state { font-size: 13px; font-weight: bold; margin-bottom: 3px; }
+#statesub { font-size: 10px; color: #5a6070; line-height: 1.6; }
+.btn { width: 100%; padding: 8px; border: 1px solid #222529; background: transparent;
+  color: #c8cdd4; font-size: 11px; font-family: monospace; border-radius: 4px;
+  cursor: pointer; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 5px; }
+.btn:hover { background: rgba(255,255,255,0.04); }
+.btn.r { border-color: rgba(226,75,74,0.5); color: #E24B4A; }
+.mrow { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }
+.ml { font-size: 10px; color: #5a6070; width: 38px; }
+.mb { flex: 1; height: 4px; background: #222; border-radius: 2px; overflow: hidden; }
+.mf { height: 100%; border-radius: 2px; }
+.mv { font-size: 10px; color: #5a6070; width: 32px; text-align: right; }
+</style>
+</head>
+<body>
+<h1>FrozenTime — Clockfield Qubit</h1>
+<div class="sub">Γ(x) = 1/(1+τβ)²  |  phase = hue  |  amplitude = brightness  |  red = frozen</div>
+<div id="main">
+  <div id="canvas-wrap">
+    <canvas id="c" width="360" height="360"></canvas>
+    <canvas id="overlay" width="360" height="360"></canvas>
+  </div>
+  <div id="panel">
+    <div class="card">
+      <div class="ct">Qubit State</div>
+      <div id="state" style="color:#1D9E75">SUPERPOSITION</div>
+      <div id="statesub">Wave thawed. Γ > 0.<br>Phase coherence intact.</div>
+    </div>
+    <div class="card">
+      <div class="ct">Parameters</div>
+      <div class="row"><label>τ coupling</label><input type="range" id="tau" min="0.5" max="12" step="0.1" value="5"><span class="v" id="tv">5.0</span></div>
+      <div class="row"><label>σ noise</label><input type="range" id="noise" min="0" max="1.5" step="0.05" value="0.3"><span class="v" id="nv">0.30</span></div>
+      <div class="row"><label>Ξ thresh</label><input type="range" id="xi" min="0.5" max="5" step="0.1" value="1.5"><span class="v" id="xv">1.50</span></div>
+    </div>
+    <div class="card">
+      <div class="ct">Field Diagnostics</div>
+      <div class="mrow"><span class="ml">max β</span><div class="mb"><div class="mf" id="mb" style="background:#378ADD;width:0%"></div></div><span class="mv" id="vb">0.00</span></div>
+      <div class="mrow"><span class="ml">min Γ</span><div class="mb"><div class="mf" id="mg" style="background:#1D9E75;width:100%"></div></div><span class="mv" id="vg">1.00</span></div>
+      <div class="mrow"><span class="ml">frozen</span><div class="mb"><div class="mf" id="mf" style="background:#E24B4A;width:0%"></div></div><span class="mv" id="vf">0.0%</span></div>
+    </div>
+    <div class="card">
+      <button class="btn r" id="bm">Force Measurement (collapse)</button>
+      <button class="btn" id="br">Reset Vortex</button>
+    </div>
+  </div>
+</div>
+<script>
+const N=80,W=360,sc=W/N;
+const cv=document.getElementById('c'),ov=document.getElementById('overlay');
+cv.width=ov.width=W; cv.height=ov.height=W;
+const ctx=cv.getContext('2d'),octx=ov.getContext('2d');
+let tau=5,noiseAmp=0.3,xi=1.5,mp=0,t=0;
+const dt=0.25;
+const fm=new Uint8Array(N*N),pr=[];
+let pr_=new Float32Array(N*N),pi_=new Float32Array(N*N),pro=new Float32Array(N*N),pio=new Float32Array(N*N);
+function idx(x,y){return((y+N)%N)*N+((x+N)%N);}
+function init(){fm.fill(0);pr.length=0;mp=0;
+  const cx=N/2,cy=N/2,sp=N*0.18;
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+    const dx=x-cx,dy=y-cy,r=Math.sqrt(dx*dx+dy*dy),th=Math.atan2(dy,dx);
+    const e=1.4*Math.exp(-r*r/(2*sp*sp))*(r/(r+2));
+    const i=idx(x,y);pr_[i]=e*Math.cos(th);pi_[i]=e*Math.sin(th);pro[i]=pr_[i];pio[i]=pi_[i];}}
+function lap(a,x,y){return a[idx(x+1,y)]+a[idx(x-1,y)]+a[idx(x,y+1)]+a[idx(x,y-1)]-4*a[idx(x,y)];}
+function step(){
+  t+=dt;
+  const nr=new Float32Array(N*N),ni=new Float32Array(N*N);
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+    const i=idx(x,y);
+    if(fm[i]){nr[i]=pr_[i];ni[i]=pi_[i];continue;}
+    const b=pr_[i]*pr_[i]+pi_[i]*pi_[i],G=1/(1+tau*b)**2,G2=G*G;
+    const lr=lap(pr_,x,y),li=lap(pi_,x,y);
+    const nx=noiseAmp*(Math.random()-0.5)*0.4,ny=noiseAmp*(Math.random()-0.5)*0.4;
+    let er=0,ei=0;
+    if(mp>0&&x>N/2-6&&x<N/2+6&&y>N/2-6&&y<N/2+6){
+      const dr=x-N/2,di=y-N/2,p=Math.exp(-(dr*dr+di*di)/8);
+      er=3*p*Math.cos(t*0.5);ei=3*p*Math.sin(t*0.5);}
+    const vr=(pr_[i]-pro[i])*(1-0.04),vi=(pi_[i]-pio[i])*(1-0.04);
+    nr[i]=pr_[i]+vr+dt*dt*(G2*(lr+nx)+er);
+    ni[i]=pi_[i]+vi+dt*dt*(G2*(li+ny)+ei);
+    const nb=nr[i]*nr[i]+ni[i]*ni[i];
+    if(nb+noiseAmp*Math.random()*0.5>xi&&Math.random()>0.96){fm[i]=1;pr.push({x,y,l:1.0});}
+  }
+  pro.set(pr_);pio.set(pi_);pr_.set(nr);pi_.set(ni);
+  if(mp>0)mp--;}
+function render(){
+  const id=ctx.createImageData(W,W),d=id.data;
+  let mb=0,mg=1,fc=0;
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){
+    const i=idx(x,y),vr=pr_[i],vi=pi_[i],b=vr*vr+vi*vi,G=1/(1+tau*b)**2;
+    if(b>mb)mb=b;if(G<mg)mg=G;
+    const ph=Math.atan2(vi,vr),no=Math.min(b*0.6,1);
+    let r,g,bl;
+    if(fm[i]){fc++;r=220;g=40;bl=40;}
+    else{const h6=(ph/(2*Math.PI)+1)%1*6,hi=Math.floor(h6),f=h6-hi,q=no*(1-f),t2=no*f,sv=no;
+      switch(hi%6){case 0:r=sv*255;g=t2*255;bl=0;break;case 1:r=q*255;g=sv*255;bl=0;break;
+        case 2:r=0;g=sv*255;bl=t2*255;break;case 3:r=0;g=q*255;bl=sv*255;break;
+        case 4:r=t2*255;g=0;bl=sv*255;break;default:r=sv*255;g=0;bl=q*255;}}
+    const ss=Math.round(sc);
+    for(let sy=0;sy<ss;sy++)for(let sx=0;sx<ss;sx++){
+      const p=((y*ss+sy)*W+(x*ss+sx))*4;d[p]=r;d[p+1]=g;d[p+2]=bl;d[p+3]=255;}}
+  ctx.putImageData(id,0,0);
+  const fp=fc/(N*N);
+  document.getElementById('vb').textContent=mb.toFixed(2);
+  document.getElementById('vg').textContent=mg.toFixed(2);
+  document.getElementById('vf').textContent=(fp*100).toFixed(1)+'%';
+  document.getElementById('mb').style.width=Math.min(mb*25,100)+'%';
+  document.getElementById('mg').style.width=(mg*100)+'%';
+  document.getElementById('mf').style.width=Math.min(fp*300,100)+'%';
+  octx.clearRect(0,0,W,W);
+  for(let i=pr.length-1;i>=0;i--){
+    const p=pr[i];octx.fillStyle=`rgba(255,80,60,${p.l})`;
+    octx.fillRect(p.x*sc,p.y*sc,sc*1.5,sc*1.5);p.l-=0.03;if(p.l<=0)pr.splice(i,1);}
+  const st=document.getElementById('state'),sb=document.getElementById('statesub');
+  if(fp>0.15){st.textContent='COLLAPSED';st.style.color='#E24B4A';sb.textContent='Frozen. Γ→0.\nTopological scar crystallised.';}
+  else if(fp>0.02){st.textContent='DECOHERENT';st.style.color='#EF9F27';sb.textContent='Partial freeze.\nPhase coherence leaking.';}
+  else{st.textContent='SUPERPOSITION';st.style.color='#1D9E75';sb.textContent='Wave thawed. Γ > 0.\nPhase coherence intact.';}}
+function loop(){for(let s=0;s<3;s++)step();render();requestAnimationFrame(loop);}
+document.getElementById('tau').addEventListener('input',e=>{tau=parseFloat(e.target.value);document.getElementById('tv').textContent=tau.toFixed(1);});
+document.getElementById('noise').addEventListener('input',e=>{noiseAmp=parseFloat(e.target.value);document.getElementById('nv').textContent=noiseAmp.toFixed(2);});
+document.getElementById('xi').addEventListener('input',e=>{xi=parseFloat(e.target.value);document.getElementById('xv').textContent=xi.toFixed(2);});
+document.getElementById('bm').addEventListener('click',()=>{mp=30;});
+document.getElementById('br').addEventListener('click',init);
+init();loop();
+</script>
+</body>
+</html>
